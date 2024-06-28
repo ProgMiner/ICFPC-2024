@@ -1,0 +1,10 @@
+
+# Vim
+.*.sw?
+
+# Main.hs
+/Main.hi
+/Main.o
+/Main
+
+/token.txt
