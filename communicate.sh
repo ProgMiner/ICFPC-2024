@@ -11,7 +11,7 @@ echo Code to send: "$code"
 # echo "$code" | ./Main
 echo
 
-resp=$(curl -d "$code" -H "$(cat ./token.txt)" https://boundvariable.space/communicate)
+resp=$(echo "$code" | curl -d '@-' -H "$(cat ./token.txt)" https://boundvariable.space/communicate)
 
 echo Response:
 echo "$resp"

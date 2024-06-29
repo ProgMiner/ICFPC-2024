@@ -9,5 +9,13 @@ def to_icfp(c):
     except IndexError:
         return c
 
-text = input()
+text = ''
+while True:
+    try:
+        line = input()
+    except EOFError:
+        break
+
+    text += line
+
 print(''.join([to_icfp(c) for c in text]))
