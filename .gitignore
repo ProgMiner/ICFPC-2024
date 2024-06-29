@@ -2,9 +2,9 @@
 # Vim
 .*.sw?
 
-# Main.hs
-/Main.hi
-/Main.o
+# Haskell
+*.hi
+*.o
 /Main
 
 /token.txt

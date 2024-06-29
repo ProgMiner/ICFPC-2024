@@ -1,10 +1,14 @@
 #!/usr/bin/env sh
 
 
-code=S$(./print_string.py)
+if [ "$1" = '-r' ] ; then
+    read -r code
+else
+    code=S$(./print_string.py)
+fi
 
 echo Code to send: "$code"
-echo "$code" | ./Main
+# echo "$code" | ./Main
 echo
 
 resp=$(curl -d "$code" -H "$(cat ./token.txt)" https://boundvariable.space/communicate)
