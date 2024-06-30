@@ -3,7 +3,6 @@
 module Main where
 
 import Control.Monad.Except
-import Control.Monad.Writer
 
 import Prelude hiding (showString, showChar)
 

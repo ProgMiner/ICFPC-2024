@@ -3,7 +3,9 @@
 module ICFP where
 
 import Control.Monad.Except
+import Control.Monad.ST.Trans
 import Control.Applicative
+import Unsafe.Coerce
 
 import Data.Char (chr, ord)
 import Data.List (genericTake, genericDrop, union, delete)
@@ -34,7 +36,6 @@ data BinaryOp
     | CatBinaryOp
     | TakeBinaryOp
     | DropBinaryOp
-    | AppBinaryOp
     deriving (Show, Eq)
 
 data Token
@@ -43,6 +44,7 @@ data Token
     | StringToken String
     | UnaryToken UnaryOp
     | BinaryToken BinaryOp
+    | AppToken
     | IfToken
     | LambdaToken Var
     | VarToken Var
@@ -54,10 +56,14 @@ data Expr
     | StringExpr String
     | UnaryExpr UnaryOp Expr
     | BinaryExpr BinaryOp Expr Expr
+    | AppExpr Expr Expr
     | IfExpr Expr Expr Expr
     | LambdaExpr Var Expr
     | VarExpr Var
+    | ThunkExpr Thunk
     deriving (Show, Eq)
+
+data Thunk deriving (Show, Eq)
 
 newtype Parser m t a = Parser { runParser :: [t] -> m (a, [t]) }
 
@@ -121,7 +127,6 @@ parseBinaryOp "&" = pure AndBinaryOp
 parseBinaryOp "." = pure CatBinaryOp
 parseBinaryOp "T" = pure TakeBinaryOp
 parseBinaryOp "D" = pure DropBinaryOp
-parseBinaryOp "$" = pure AppBinaryOp
 parseBinaryOp tok = throwError $ "unsupported binary operator: " ++ tok
 
 parseToken :: MonadError String m => String -> m Token
@@ -131,6 +136,7 @@ parseToken "F" = pure $ BoolToken False
 parseToken ('I':tok) = IntToken <$> parseInt tok
 parseToken ('S':tok) = pure $ StringToken tok
 parseToken ('U':tok) = UnaryToken <$> parseUnaryOp tok
+parseToken "B$" = pure AppToken
 parseToken ('B':tok) = BinaryToken <$> parseBinaryOp tok
 parseToken "?" = pure IfToken
 parseToken ('L':tok) = LambdaToken <$> parseInt tok
@@ -151,6 +157,7 @@ exprParser' (IntToken v) = pure $ IntExpr v
 exprParser' (StringToken v) = pure $ StringExpr v
 exprParser' (UnaryToken op) = UnaryExpr op <$> exprParser
 exprParser' (BinaryToken op) = BinaryExpr op <$> exprParser <*> exprParser
+exprParser' AppToken = AppExpr <$> exprParser <*> exprParser
 exprParser' IfToken = IfExpr <$> exprParser <*> exprParser <*> exprParser
 exprParser' (LambdaToken x) = LambdaExpr x <$> exprParser
 exprParser' (VarToken x) = pure $ VarExpr x
@@ -158,95 +165,94 @@ exprParser' (VarToken x) = pure $ VarExpr x
 exprParser :: MonadError String m => Parser m Token Expr
 exprParser = tokenParser >>= exprParser'
 
-isValue :: Expr -> Bool
-isValue (BoolExpr _) = True
-isValue (IntExpr _) = True
-isValue (StringExpr _) = True
-isValue _ = False
-
 freeVars :: Expr -> [Var]
 freeVars (BoolExpr _) = []
 freeVars (IntExpr _) = []
 freeVars (StringExpr _) = []
 freeVars (UnaryExpr _ e) = freeVars e
 freeVars (BinaryExpr _ lhs rhs) = freeVars lhs `union` freeVars rhs
+freeVars (AppExpr lhs rhs) = freeVars lhs `union` freeVars rhs
 freeVars (IfExpr c t f) = freeVars c `union` freeVars t `union` freeVars f
 freeVars (LambdaExpr v e) = delete v $ freeVars e
 freeVars (VarExpr v) = [v]
+freeVars (ThunkExpr _) = []
 
-freshVar :: [Var] -> Var
-freshVar xs = maximum xs + 100
+substVar :: Var -> Expr -> Expr -> Expr
+substVar _ _ e@(BoolExpr _) = e
+substVar _ _ e@(IntExpr _) = e
+substVar _ _ e@(StringExpr _) = e
+substVar v x (UnaryExpr op e) = UnaryExpr op $ substVar v x e
+substVar v x (BinaryExpr op lhs rhs) = BinaryExpr op (substVar v x lhs) (substVar v x rhs)
+substVar v x (AppExpr lhs rhs) = AppExpr (substVar v x lhs) (substVar v x rhs)
+substVar v x (IfExpr c t f) = IfExpr (substVar v x c) (substVar v x t) (substVar v x f)
+substVar v x (LambdaExpr v' b) | v == v' = LambdaExpr v' b
+                               | v' `elem` freeVars x = error "ill-formed substitution"
+                               | otherwise = LambdaExpr v' $ substVar v x b
 
-substVar :: MonadError String m => Var -> Expr -> Expr -> m Expr
-substVar _ _ e@(BoolExpr _) = pure e
-substVar _ _ e@(IntExpr _) = pure e
-substVar _ _ e@(StringExpr _) = pure e
-substVar v x (UnaryExpr op e) = UnaryExpr op <$> substVar v x e
-substVar v x (BinaryExpr op lhs rhs) = BinaryExpr op <$> substVar v x lhs <*> substVar v x rhs
-substVar v x (IfExpr c t f) = IfExpr <$> substVar v x c <*> substVar v x t <*> substVar v x f
-substVar v x (LambdaExpr v' b) | v == v' = pure $ LambdaExpr v' b
-                               | v' `elem` fv'x =
-    let v'' = freshVar $ fv'x ++ freeVars b in
-    LambdaExpr v'' <$> (substVar v' (VarExpr v'') b >>= substVar v x)
-                               | otherwise = LambdaExpr v' <$> substVar v x b
-    where fv'x = freeVars x
-substVar v x (VarExpr v') | v == v'   = pure x
-                          | otherwise = pure $ VarExpr v'
+substVar v x (VarExpr v') | v == v'   = x
+                          | otherwise = VarExpr v'
+substVar _ _ e@(ThunkExpr _) = e
 
-evalUnaryOp :: MonadError String m => UnaryOp -> Expr -> Maybe (m Expr)
-evalUnaryOp NegUnaryOp (IntExpr v) = Just $ pure $ IntExpr (-v)
-evalUnaryOp NotUnaryOp (BoolExpr v) = Just $ pure $ BoolExpr $ not v
-evalUnaryOp StrToIntUnaryOp (StringExpr v) = Just $ IntExpr <$> parseInt v
-evalUnaryOp IntToStrUnaryOp (IntExpr v) = Just $ StringExpr <$> unparseInt v
-evalUnaryOp op e | isValue e = Just $ throwError $ "unsupported operand for unary operator "
-                                        ++ show op ++ ": " ++ show e
-                 | otherwise = (UnaryExpr op <$>) <$> oneStep e
+evalUnaryOp :: MonadError String m => UnaryOp -> Expr -> m Expr
+evalUnaryOp NegUnaryOp (IntExpr v) = pure $ IntExpr (-v)
+evalUnaryOp NotUnaryOp (BoolExpr v) = pure $ BoolExpr $ not v
+evalUnaryOp StrToIntUnaryOp (StringExpr v) = IntExpr <$> parseInt v
+evalUnaryOp IntToStrUnaryOp (IntExpr v) = StringExpr <$> unparseInt v
+evalUnaryOp op e = throwError $ "unsupported operand for unary operator "
+                    ++ show op ++ ": " ++ show e
 
-evalBinaryOp' :: MonadError String m => BinaryOp -> Expr -> Expr -> Maybe (m Expr)
-evalBinaryOp' AddBinaryOp  (IntExpr    a) (IntExpr    b) = Just $ pure $ IntExpr  $ a + b
-evalBinaryOp' SubBinaryOp  (IntExpr    a) (IntExpr    b) = Just $ pure $ IntExpr  $ a - b
-evalBinaryOp' MulBinaryOp  (IntExpr    a) (IntExpr    b) = Just $ pure $ IntExpr  $ a * b
-evalBinaryOp' DivBinaryOp  (IntExpr    a) (IntExpr    b) = Just $ pure $ IntExpr  $ a `quot` b
-evalBinaryOp' RemBinaryOp  (IntExpr    a) (IntExpr    b) = Just $ pure $ IntExpr  $ a `rem` b
-evalBinaryOp' LtBinaryOp   (IntExpr    a) (IntExpr    b) = Just $ pure $ BoolExpr $ a < b
-evalBinaryOp' GtBinaryOp   (IntExpr    a) (IntExpr    b) = Just $ pure $ BoolExpr $ a > b
-evalBinaryOp' EqBinaryOp   (BoolExpr   a) (BoolExpr   b) = Just $ pure $ BoolExpr $ a == b
-evalBinaryOp' EqBinaryOp   (IntExpr    a) (IntExpr    b) = Just $ pure $ BoolExpr $ a == b
-evalBinaryOp' EqBinaryOp   (StringExpr a) (StringExpr b) = Just $ pure $ BoolExpr $ a == b
-evalBinaryOp' OrBinaryOp   (BoolExpr   a) (BoolExpr   b) = Just $ pure $ BoolExpr $ a || b
-evalBinaryOp' AndBinaryOp  (BoolExpr   a) (BoolExpr   b) = Just $ pure $ BoolExpr $ a && b
-evalBinaryOp' CatBinaryOp  (StringExpr a) (StringExpr b) = Just $ pure $ StringExpr $ a ++ b
-evalBinaryOp' TakeBinaryOp (IntExpr    n) (StringExpr s) = Just $ pure $ StringExpr $ genericTake n s
-evalBinaryOp' DropBinaryOp (IntExpr    n) (StringExpr s) = Just $ pure $ StringExpr $ genericDrop n s
-evalBinaryOp' op lhs rhs | isValue'lhs && isValue rhs = Just
-    $ throwError $ "unsupported operands for binary operator " ++ show op ++ ": "
-        ++ show lhs ++ ", " ++ show rhs
-                         | isValue'lhs = (BinaryExpr op lhs <$>) <$> oneStep rhs
-                         | otherwise   = ((\lhs' -> BinaryExpr op lhs' rhs) <$>) <$> oneStep lhs
-    where isValue'lhs = isValue lhs
+evalBinaryOp :: MonadError String m => BinaryOp -> Expr -> Expr -> m Expr
+evalBinaryOp AddBinaryOp  (IntExpr    a) (IntExpr    b) = pure $ IntExpr  $ a + b
+evalBinaryOp SubBinaryOp  (IntExpr    a) (IntExpr    b) = pure $ IntExpr  $ a - b
+evalBinaryOp MulBinaryOp  (IntExpr    a) (IntExpr    b) = pure $ IntExpr  $ a * b
+evalBinaryOp DivBinaryOp  (IntExpr    a) (IntExpr    b) = pure $ IntExpr  $ a `quot` b
+evalBinaryOp RemBinaryOp  (IntExpr    a) (IntExpr    b) = pure $ IntExpr  $ a `rem` b
+evalBinaryOp LtBinaryOp   (IntExpr    a) (IntExpr    b) = pure $ BoolExpr $ a < b
+evalBinaryOp GtBinaryOp   (IntExpr    a) (IntExpr    b) = pure $ BoolExpr $ a > b
+evalBinaryOp EqBinaryOp   (BoolExpr   a) (BoolExpr   b) = pure $ BoolExpr $ a == b
+evalBinaryOp EqBinaryOp   (IntExpr    a) (IntExpr    b) = pure $ BoolExpr $ a == b
+evalBinaryOp EqBinaryOp   (StringExpr a) (StringExpr b) = pure $ BoolExpr $ a == b
+evalBinaryOp OrBinaryOp   (BoolExpr   a) (BoolExpr   b) = pure $ BoolExpr $ a || b
+evalBinaryOp AndBinaryOp  (BoolExpr   a) (BoolExpr   b) = pure $ BoolExpr $ a && b
+evalBinaryOp CatBinaryOp  (StringExpr a) (StringExpr b) = pure $ StringExpr $ a ++ b
+evalBinaryOp TakeBinaryOp (IntExpr    n) (StringExpr s) = pure $ StringExpr $ genericTake n s
+evalBinaryOp DropBinaryOp (IntExpr    n) (StringExpr s) = pure $ StringExpr $ genericDrop n s
+evalBinaryOp op lhs rhs = throwError $ "unsupported operands for binary operator "
+                            ++ show op ++ ": " ++ show lhs ++ ", " ++ show rhs
 
-evalBinaryOp :: MonadError String m => BinaryOp -> Expr -> Expr -> Maybe (m Expr)
-evalBinaryOp AppBinaryOp (LambdaExpr v b) rhs = Just $ substVar v rhs b
-evalBinaryOp AppBinaryOp lhs rhs | isValue lhs = Just
-    $ throwError $ "unable to apply non-functional value: " ++ show lhs
-evalBinaryOp AppBinaryOp lhs rhs = ((\lhs' -> BinaryExpr AppBinaryOp lhs' rhs) <$>) <$> oneStep lhs
-evalBinaryOp op lhs rhs = evalBinaryOp' op lhs rhs
+evalApp :: MonadError String m => Expr -> Expr -> STT s m Expr
+evalApp x (LambdaExpr v b) = do th <- newSTRef $ Left x
+                                eval' $ substVar v (ThunkExpr $ unsafeCoerce th) b
 
-oneStep :: MonadError String m => Expr -> Maybe (m Expr)
-oneStep (BoolExpr _) = Nothing
-oneStep (IntExpr _) = Nothing
-oneStep (StringExpr _) = Nothing
-oneStep (UnaryExpr op e) = evalUnaryOp op e
-oneStep (BinaryExpr op lhs rhs) = evalBinaryOp op lhs rhs
-oneStep (IfExpr (BoolExpr v) t f) = Just $ pure $ if v then t else f
-oneStep (IfExpr c t f) | isValue c = Just $ throwError $ "unsupported condition " ++ show c
-                       | otherwise = ((\c' -> IfExpr c' t f) <$>) <$> oneStep c
-oneStep e = Just $ throwError $ "unsupported expr " ++ show e
+evalApp _ f = throwError $ "unable to apply non-functional value: " ++ show f
+
+evalIf :: MonadError String m => Expr -> Expr -> Expr -> STT s m Expr
+evalIf t f (BoolExpr v) = eval' $ if v then t else f
+evalIf _ _ c = throwError $ "unsupported condition " ++ show c
+
+evalThunk :: MonadError String m => STRef s (Either Expr Expr) -> STT s m Expr
+evalThunk th = do x <- readSTRef th
+                  case x of
+                      Left x -> do x' <- eval' x
+                                   writeSTRef th $ Right x'
+                                   pure x'
+
+                      Right x -> pure x
+
+eval' :: MonadError String m => Expr -> STT s m Expr
+eval' e@(BoolExpr _) = pure e
+eval' e@(IntExpr _) = pure e
+eval' e@(StringExpr _) = pure e
+eval' (UnaryExpr op e) = eval' e >>= evalUnaryOp op
+eval' (BinaryExpr op lhs rhs) = eval' lhs >>= \lhs' -> eval' rhs >>= evalBinaryOp op lhs'
+eval' (AppExpr f x) = eval' f >>= evalApp x
+eval' (IfExpr c t f) = eval' c >>= evalIf t f
+eval' e@(LambdaExpr _ _) = pure e
+eval' (ThunkExpr th') = evalThunk $ unsafeCoerce th'
+eval' e = throwError $ "unsupported expr: " ++ show e
 
 eval :: MonadError String m => Expr -> m Expr
-eval e = case oneStep e of
-             Just res -> res >>= eval
-             Nothing -> pure e
+eval e = runSTT (eval' e)
 
 showString :: MonadError String m => String -> m String
 showString = mapM showChar

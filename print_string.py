@@ -16,6 +16,9 @@ while True:
     except EOFError:
         break
 
+    if text:
+        text += '\n'
+
     text += line
 
 print(''.join([to_icfp(c) for c in text]))
