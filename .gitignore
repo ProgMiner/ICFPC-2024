@@ -3,6 +3,8 @@
 .*.sw?
 
 # Haskell
+*.dyn_hi
+*.dyn_o
 *.hi
 *.o
 /Main
