@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import sys
+
 
 def calc_point(x, y, vx, vy, p):
     tx, ty = p
@@ -56,12 +58,6 @@ def calc_point(x, y, vx, vy, p):
     return (x, y, vx, vy, path)
 
 
-def metric(val):
-    x, y, vx, vy, path = val
-
-    return (len(path), abs(vx) + abs(vy))
-
-
 points = set()
 
 try:
@@ -77,9 +73,16 @@ except EOFError:
 x, y, vx, vy = 0, 0, 0, 0
 res = ''
 
+points_len = len(points)
+
 while points:
-    x, y, vx, vy, path = min([calc_point(x, y, vx, vy, p) for p in points], key=metric)
-    points.remove((x, y))
+    p = min(points, key=lambda p: (p[0] - x)**2 + (p[1] - y)**2)
+    points.remove(p)
+
+    x, y, vx, vy, path = calc_point(x, y, vx, vy, p)
+
+    print('Progress:', points_len - len(points), '/', points_len, 'l: ', len(res),
+        end='\r', file=sys.stderr)
 
     res += path
 
