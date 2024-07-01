@@ -8,5 +8,6 @@
 *.hi
 *.o
 /Main
+/3d/Main
 
 /token.txt

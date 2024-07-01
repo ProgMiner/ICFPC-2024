@@ -223,8 +223,8 @@ oneStepEq p (x, y) = handleNothing $ runMaybeT $ do
 
     unless (p a b) empty
 
-    oneStepPlace (x + 1, y) a
-    oneStepPlace (x, y + 1) b
+    oneStepPlace (x, y + 1) a
+    oneStepPlace (x + 1, y) b
 
 oneStep'' :: (MonadError String m, MonadState EvalContext m) => (Int, Int) -> Op -> m ()
 oneStep'' (x, y) LOp = oneStepMove (x + 1, y) (x - 1, y)
