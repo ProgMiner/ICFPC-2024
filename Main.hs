@@ -29,6 +29,9 @@ main = do code <- getContents
           putStrLn $ "Parsed expr: " ++ show expr
           putStrLn ""
 
+          putStrLn $ "In Haskell: " ++ toHaskell expr ""
+          putStrLn ""
+
           res <- runErrorIO $ eval expr >>= showValue
 
           putStrLn "Evaluation result:"

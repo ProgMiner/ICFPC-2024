@@ -268,3 +268,29 @@ showValue (BoolExpr v) = pure $ show v
 showValue (IntExpr v) = pure $ show v
 showValue (StringExpr v) = showString v
 showValue e = throwError $ "not a value: " ++ show e
+
+toHaskell :: Expr -> ShowS
+toHaskell (BoolExpr v) = shows v
+toHaskell (IntExpr v) = shows v
+toHaskell (StringExpr v) = shows v
+toHaskell (UnaryExpr NegUnaryOp e) = ("(- " ++) . toHaskell e . (")" ++)
+toHaskell (UnaryExpr NotUnaryOp e) = ("(not " ++) . toHaskell e . (")" ++)
+toHaskell (UnaryExpr StrToIntUnaryOp e) = undefined
+toHaskell (UnaryExpr IntToStrUnaryOp e) = undefined
+toHaskell (BinaryExpr AddBinaryOp lhs rhs) = ("(" ++) . toHaskell lhs . (" + " ++) . toHaskell rhs . (")" ++)
+toHaskell (BinaryExpr SubBinaryOp lhs rhs) = ("(" ++) . toHaskell lhs . (" - " ++) . toHaskell rhs . (")" ++)
+toHaskell (BinaryExpr MulBinaryOp lhs rhs) = ("(" ++) . toHaskell lhs . (" * " ++) . toHaskell rhs . (")" ++)
+toHaskell (BinaryExpr DivBinaryOp lhs rhs) = ("(" ++) . toHaskell lhs . (" `quot` " ++) . toHaskell rhs . (")" ++)
+toHaskell (BinaryExpr RemBinaryOp lhs rhs) = ("(" ++) . toHaskell lhs . (" `rem` " ++) . toHaskell rhs . (")" ++)
+toHaskell (BinaryExpr LtBinaryOp lhs rhs) = ("(" ++) . toHaskell lhs . (" < " ++) . toHaskell rhs . (")" ++)
+toHaskell (BinaryExpr GtBinaryOp lhs rhs) = ("(" ++) . toHaskell lhs . (" > " ++) . toHaskell rhs . (")" ++)
+toHaskell (BinaryExpr EqBinaryOp lhs rhs) = ("(" ++) . toHaskell lhs . (" == " ++) . toHaskell rhs . (")" ++)
+toHaskell (BinaryExpr OrBinaryOp lhs rhs) = ("(" ++) . toHaskell lhs . (" || " ++) . toHaskell rhs . (")" ++)
+toHaskell (BinaryExpr AndBinaryOp lhs rhs) = ("(" ++) . toHaskell lhs . (" && " ++) . toHaskell rhs . (")" ++)
+toHaskell (BinaryExpr CatBinaryOp lhs rhs) = ("(" ++) . toHaskell lhs . (" ++ " ++) . toHaskell rhs . (")" ++)
+toHaskell (BinaryExpr TakeBinaryOp lhs rhs) = ("(" ++) . toHaskell lhs . (" `take` " ++) . toHaskell rhs . (")" ++)
+toHaskell (BinaryExpr DropBinaryOp lhs rhs) = ("(" ++) . toHaskell lhs . (" `drop` " ++) . toHaskell rhs . (")" ++)
+toHaskell (AppExpr lhs rhs) = ("(" ++) . toHaskell lhs . (" " ++) . toHaskell rhs . (")" ++)
+toHaskell (IfExpr c t f) = ("(if " ++) . toHaskell c . (" then " ++) . toHaskell t . (" else " ++) . toHaskell f . (")" ++)
+toHaskell (LambdaExpr v b) = ("(\\v" ++) . shows v . (" -> " ++) . toHaskell b . (")" ++)
+toHaskell (VarExpr v) = ("v" ++) . shows v
