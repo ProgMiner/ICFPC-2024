@@ -1,4 +1,5 @@
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
 #include <iostream>
 #include <optional>
@@ -35,7 +36,21 @@ static node * get_node(field & nodes, uint64_t x, uint64_t y) {
     return nullptr;
 }
 
-static node * find_next(field & nodes, uint64_t x, uint64_t y, std::string & path) {
+static char get_dir(const node & a, const node & b) {
+    if (b.x < a.x) {
+        return 'L';
+    } else if (b.x > a.x) {
+        return 'R';
+    } else if (b.y < a.y) {
+        return 'U';
+    } else if (b.y > a.y) {
+        return 'D';
+    } else {
+        throw std::logic_error { "wtf" };
+    }
+}
+
+static node * find_next1(field & nodes, uint64_t x, uint64_t y, std::string & path) {
     std::list<path_list> path_nodes;
 
     std::queue<std::pair<node *, const path_list *>> q;
@@ -59,24 +74,8 @@ static node * find_next(field & nodes, uint64_t x, uint64_t y, std::string & pat
             break;
         }
 
-        for (node * neigh : cur->edges) {
-            path_list next_path_node;
-
-            if (neigh->x < cur->x) {
-                next_path_node.dir = 'L';
-            } else if (neigh->x > cur->x) {
-                next_path_node.dir = 'R';
-            } else if (neigh->y < cur->y) {
-                next_path_node.dir = 'U';
-            } else if (neigh->y > cur->y) {
-                next_path_node.dir = 'D';
-            } else {
-                throw std::logic_error { "wtf" };
-            }
-
-            next_path_node.prev = path_node;
-            path_nodes.push_back(next_path_node);
-
+        for (node * const neigh : cur->edges) {
+            path_nodes.push_back({ get_dir(*cur, *neigh), path_node });
             q.push({ neigh, &path_nodes.back() });
         }
     }
@@ -93,6 +92,64 @@ static node * find_next(field & nodes, uint64_t x, uint64_t y, std::string & pat
 
     std::reverse(path.begin(), path.end());
     return res->first;
+}
+
+static uint64_t find_next2_hlp(std::unordered_set<node *> & vis, node * cur) {
+    if (cur->visited) {
+        return 0;
+    }
+
+    if (vis.find(cur) != vis.end()) {
+        return 0;
+    }
+
+    vis.insert(cur);
+
+    uint64_t res = 1;
+    for (node * const neigh : cur->edges) {
+        res += find_next2_hlp(vis, neigh);
+    }
+
+    return res;
+}
+
+static node * find_next2(field & nodes, uint64_t x, uint64_t y, std::string & path) {
+    node * const cur = get_node(nodes, x, y);
+
+    uint64_t best = UINT64_MAX;
+    std::vector<node *> best_nodes;
+    for (node * const neigh : cur->edges) {
+        if (neigh->visited) {
+            continue;
+        }
+
+        std::unordered_set<node *> vis;
+        const uint64_t x = find_next2_hlp(vis, neigh);
+        
+        if (best > x) {
+            best = x;
+            best_nodes = { neigh };
+        } else if (best == x) {
+            best_nodes.push_back(neigh);
+        }
+    }
+
+    if (best_nodes.empty() || best_nodes.size() > 1) {
+        return nullptr;
+    }
+
+    path += get_dir(*cur, *best_nodes.front());
+    return best_nodes.front();
+}
+
+static node * find_next(field & nodes, uint64_t x, uint64_t y, std::string & path) {
+    node * result;
+
+    if ((result = find_next2(nodes, x, y, path))) {
+        return result;
+    }
+
+    return find_next1(nodes, x, y, path);
 }
 
 int main() {
